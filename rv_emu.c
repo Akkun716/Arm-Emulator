@@ -5,6 +5,8 @@
 
 #include "rv_emu.h"
 
+#define DEBUG 0
+
 uint32_t get_bitseq_c(uint32_t num, int start, int end);
 
 void unsupported(char *s, uint32_t val) {
@@ -40,6 +42,32 @@ void rv_init(struct rv_state *rsp, uint32_t *func,
     rsp->regs[A1] = a1;
     rsp->regs[A2] = a2;
     rsp->regs[A3] = a3;
+
+    memset(&rsp->analysis, 0, sizeof(struct rv_analysis_st));
+    cache_init(&rsp->i_cache);  
+}
+
+static void print_pct(char *fmt, int numer, int denom) {
+    double pct = 0.0;
+
+    if (denom) {
+        pct = (double) numer / (double) denom * 100.0;
+    }
+    printf(fmt, numer, pct);
+}
+
+void rv_print(struct rv_analysis_st *a) {
+    int b_total = a->b_taken + a->b_not_taken;
+
+    printf("=== Analysis\n");
+    print_pct("Instructions Executed  = %d\n", a->i_count, a->i_count);
+    print_pct("R-type + I-type        = %d (%.2f%%)\n", a->ir_count, a->i_count);
+    print_pct("Loads                  = %d (%.2f%%)\n", a->ld_count, a->i_count);
+    print_pct("Stores                 = %d (%.2f%%)\n", a->st_count, a->i_count);
+    print_pct("Jumps/JAL/JALR         = %d (%.2f%%)\n", a->j_count, a->i_count);
+    print_pct("Conditional branches   = %d (%.2f%%)\n", b_total, a->i_count);
+    print_pct("  Branches taken       = %d (%.2f%%)\n", a->b_taken, b_total);
+    print_pct("  Branches not taken   = %d (%.2f%%)\n", a->b_not_taken, b_total);
 }
 
 void emu_r_type(struct rv_state *rsp, uint32_t iw) {
@@ -170,6 +198,10 @@ void rv_one(struct rv_state *rsp) {
         uint32_t iw = *pc;
     */
 
+    //iw = *(uint32_t*) rsp->pc;
+    // Use below to add cache
+    iw = cache_lookup(&rsp->i_cache, (uint64_t) rsp->pc);
+    
     uint32_t opcode = iw & 0b1111111;
     switch (opcode) {
         case 0b0110011:
