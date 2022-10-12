@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "rv_emu.h"
 
@@ -108,21 +109,80 @@ void emu_r_type(struct rv_state *rsp, uint32_t iw) {
     rsp->pc += 4; // Next instruction
 }
 
+int64_t get_store_offset(uint32_t iw) {
+    int64_t output;
+    uint32_t imm4_0 = get_bitseq_c(iw, 7, 11);
+    uint32_t imm11_5 = get_bitseq_c(iw, 25, 31);
+
+    output = (imm11_5 << 5) | imm4_0;
+    return (output << 51) >> 51;
+}
+
+void emu_store_type(struct rv_state *rsp, uint32_t iw) {
+    uint32_t rd = (iw >> 7) & 0b1111;
+    uint32_t rs1 = (iw >> 15) & 0b11111;
+    uint32_t rs2 = (iw >> 20) & 0b11111;
+    uint32_t funct3 = (iw >> 12) & 0b111;
+    int64_t imm = get_store_offset(iw);
+    uint64_t addr = rsp->regs[rs1] + imm;
+
+    switch(funct3) {
+        case 0b000:
+            *((uint8_t *) addr) = (uint8_t) rsp->regs[rs2];
+            break;
+        case 0b010:
+            *((uint32_t *) addr) = (uint32_t) rsp->regs[rs2];
+            break;
+        case 0b011:
+            *((uint64_t *) addr) = (uint64_t) rsp->regs[rs2];
+            break;
+        default:
+            unsupported("Store-type funct3", funct3);
+    }
+    rsp->pc += 4; // Next instruction
+}
+
 void emu_i_type(struct rv_state *rsp, uint32_t iw) {
     uint32_t rd = get_bitseq_c(iw, 7, 11);
     uint32_t rs1 = get_bitseq_c(iw, 15, 19);
-    int64_t imm = (get_bitseq_c(iw, 20, 31) << 52) >> 52;
+    int64_t imm = (((int64_t) get_bitseq_c(iw, 20, 31)) << 52) >> 52;
     uint32_t funct3 = get_bitseq_c(iw, 12, 14);
 
     switch(funct3) {
         case 0b000:
             rsp->regs[rd] = rsp->regs[rs1] + imm;
             break;
+        case 0b001:
+            rsp->regs[rd] = rsp->regs[rs1] << imm;
+            break;
         case 0b101:
-            rsp->regs[rd] = rsp->regs[rs1] > imm;
+            rsp->regs[rd] = rsp->regs[rs1] >> imm;
             break;
         default:
             unsupported("I-type funct3", funct3);
+    }
+    rsp->pc += 4; // Next instruction
+}
+
+void emu_load_type(struct rv_state *rsp, uint32_t iw) {
+    uint32_t rd = get_bitseq_c(iw, 7, 11);
+    uint32_t rs1 = get_bitseq_c(iw, 15, 19);
+    int64_t imm = (((int64_t) get_bitseq_c(iw, 20, 31)) << 52) >> 52;
+    uint32_t funct3 = get_bitseq_c(iw, 12, 14);
+    uint64_t addr = rsp->regs[rs1] + imm;
+
+    switch(funct3) {
+        case 0b000:
+            rsp->regs[rd] = *((uint8_t *) addr);
+            break;
+        case 0b010:
+            rsp->regs[rd] = *((uint32_t *) addr);
+            break;
+        case 0b011:
+            rsp->regs[rd] = *((uint64_t *) addr);
+            break;
+        default:
+            unsupported("Load-type funct3", funct3);
     }
     rsp->pc += 4; // Next instruction
 }
@@ -144,10 +204,12 @@ void emu_b_type(struct rv_state *rsp, uint32_t iw) {
     int64_t offset = get_b_offset(iw);
     uint32_t funct3 = get_bitseq_c(iw, 12, 14);
 
+    uint8_t b_exec = 0;
     switch(funct3) {
-        case 0b100:
-            if((int64_t)rsp->regs[rs1] < (int64_t)rsp->regs[rs2]) {
-                rsp->pc = rsp->pc + offset;  
+        case 0b000:
+            if((int32_t)rsp->regs[rs1] == (int32_t)rsp->regs[rs2]) {
+                rsp->pc = rsp->pc + offset;
+                b_exec = 1;
             } else {
                 rsp->pc += 4;
             }
@@ -155,6 +217,23 @@ void emu_b_type(struct rv_state *rsp, uint32_t iw) {
         case 0b001:
             if((int64_t)rsp->regs[rs1] != (int64_t)rsp->regs[rs2]) {
                 rsp->pc = rsp->pc + offset;  
+                b_exec = 1;
+            } else {
+                rsp->pc += 4;
+            }
+            break;
+        case 0b100:
+            if((int32_t)rsp->regs[rs1] < (int32_t)rsp->regs[rs2]) {
+                rsp->pc = rsp->pc + offset;  
+                b_exec = 1;
+            } else {
+                rsp->pc += 4;
+            }
+            break;
+        case 0b101:
+            if((int32_t)rsp->regs[rs1] >= (int32_t)rsp->regs[rs2]) {
+                rsp->pc = rsp->pc + offset;  
+                b_exec = 1;
             } else {
                 rsp->pc += 4;
             }
@@ -162,6 +241,11 @@ void emu_b_type(struct rv_state *rsp, uint32_t iw) {
         default:
             unsupported("B-type funct3", funct3);
             rsp->pc += 4; // Next instruction
+    }
+    if(b_exec) {
+        rsp->analysis.b_taken += 1;
+    } else {
+        rsp->analysis.b_not_taken += 1;
     }
 }
 
@@ -177,8 +261,14 @@ int64_t get_j_offset(uint32_t iw) {
 }
 
 void emu_jal(struct rv_state *rsp, uint32_t iw) {
-    uint32_t offset = get_j_offset(iw);
-    rsp->pc = rsp->pc + offset; 
+    uint32_t rd = get_bitseq_c(iw, 7, 11);
+    int64_t offset = get_j_offset(iw);
+
+    if(rd != 0) {
+        rsp->regs[rd] = rsp->pc + 4;
+    }
+    
+    rsp->pc = rsp->pc + offset;
 }
 
 void emu_jalr(struct rv_state *rsp, uint32_t iw) {
@@ -203,14 +293,27 @@ void rv_one(struct rv_state *rsp) {
     iw = cache_lookup(&rsp->i_cache, (uint64_t) rsp->pc);
     
     uint32_t opcode = iw & 0b1111111;
+    uint8_t i_exec = 1;
     switch (opcode) {
         case 0b0110011:
             // R-type instructions have two register operands
             emu_r_type(rsp, iw);
+            rsp->analysis.ir_count += 1;
+            break;
+        case 0b0100011:
+            //Store instructions are special R-type
+            emu_store_type(rsp, iw);
+            rsp->analysis.st_count += 1;
+            break;
+        case 0b0000011:
+            //Load instructions are special I-type
+            emu_load_type(rsp, iw);
+            rsp->analysis.ld_count += 1;
             break;
         case 0b0010011:
             // I-type instructions have one register operand
             emu_i_type(rsp, iw);
+            rsp->analysis.ir_count += 1;
             break;
         case 0b1100011:
             // B-type instructions have two register operand
@@ -219,15 +322,18 @@ void rv_one(struct rv_state *rsp) {
         case 0b1101111:
             // JALR (aka RET) is a variant of I-type instructions
             emu_jal(rsp, iw);
+            rsp->analysis.j_count += 1;
             break;
         case 0b1100111:
             // JALR (aka RET) is a variant of I-type instructions
             emu_jalr(rsp, iw);
+            rsp->analysis.j_count += 1;
             break;
         default:
             unsupported("Unknown opcode: ", opcode);
-            
+            i_exec = 0;
     }
+    rsp->analysis.i_count += i_exec;
 }
 
 int rv_emulate(struct rv_state *rsp) {
