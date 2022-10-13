@@ -72,10 +72,10 @@ void rv_print(struct rv_analysis_st *a) {
 }
 
 void emu_r_type(struct rv_state *rsp, uint32_t iw) {
-    uint32_t rd = (iw >> 7) & 0b1111;
-    uint32_t rs1 = (iw >> 15) & 0b11111;
-    uint32_t rs2 = (iw >> 20) & 0b11111;
-    uint32_t funct3 = (iw >> 12) & 0b111;
+    uint32_t rd = get_bitseq_c(iw, 7, 11);
+    uint32_t rs1 = get_bitseq_c(iw, 15, 19);
+    uint32_t rs2 = get_bitseq_c(iw, 20, 24);
+    uint32_t funct3 = get_bitseq_c(iw, 12, 14);
     uint32_t funct7 = get_bitseq_c(iw, 25, 31);
 
     switch(funct3) {
@@ -119,22 +119,22 @@ int64_t get_store_offset(uint32_t iw) {
 }
 
 void emu_store_type(struct rv_state *rsp, uint32_t iw) {
-    uint32_t rd = (iw >> 7) & 0b1111;
-    uint32_t rs1 = (iw >> 15) & 0b11111;
-    uint32_t rs2 = (iw >> 20) & 0b11111;
-    uint32_t funct3 = (iw >> 12) & 0b111;
+    uint32_t rd = get_bitseq_c(iw, 7, 11);
+    uint32_t rs1 = get_bitseq_c(iw, 15, 19);
+    uint32_t rs2 = get_bitseq_c(iw, 20, 24);
+    uint32_t funct3 = get_bitseq_c(iw, 12, 14);
     int64_t imm = get_store_offset(iw);
     uint64_t addr = rsp->regs[rs1] + imm;
 
     switch(funct3) {
         case 0b000:
-            *((uint8_t *) addr) = (uint8_t) rsp->regs[rs2];
+            *((uint8_t *) addr) = (uint8_t) rsp->regs[rs2]; //sb
             break;
         case 0b010:
-            *((uint32_t *) addr) = (uint32_t) rsp->regs[rs2];
+            *((uint32_t *) addr) = (uint32_t) rsp->regs[rs2]; //sw
             break;
         case 0b011:
-            *((uint64_t *) addr) = (uint64_t) rsp->regs[rs2];
+            *((uint64_t *) addr) = (uint64_t) rsp->regs[rs2]; //sd
             break;
         default:
             unsupported("Store-type funct3", funct3);
@@ -173,13 +173,13 @@ void emu_load_type(struct rv_state *rsp, uint32_t iw) {
 
     switch(funct3) {
         case 0b000:
-            rsp->regs[rd] = *((uint8_t *) addr);
+            rsp->regs[rd] = *((uint8_t *) addr); //lb
             break;
         case 0b010:
-            rsp->regs[rd] = *((uint32_t *) addr);
+            rsp->regs[rd] = *((uint32_t *) addr); //lw
             break;
         case 0b011:
-            rsp->regs[rd] = *((uint64_t *) addr);
+            rsp->regs[rd] = *((uint64_t *) addr); //ld
             break;
         default:
             unsupported("Load-type funct3", funct3);
@@ -204,7 +204,7 @@ void emu_b_type(struct rv_state *rsp, uint32_t iw) {
     int64_t offset = get_b_offset(iw);
     uint32_t funct3 = get_bitseq_c(iw, 12, 14);
 
-    uint8_t b_exec = 0;
+    uint8_t b_exec = 0; //Tracks if branch is taken, default to false
     switch(funct3) {
         case 0b000:
             if((int32_t)rsp->regs[rs1] == (int32_t)rsp->regs[rs2]) {
@@ -242,6 +242,7 @@ void emu_b_type(struct rv_state *rsp, uint32_t iw) {
             unsupported("B-type funct3", funct3);
             rsp->pc += 4; // Next instruction
     }
+
     if(b_exec) {
         rsp->analysis.b_taken += 1;
     } else {
@@ -280,15 +281,14 @@ void emu_jalr(struct rv_state *rsp, uint32_t iw) {
 
 void rv_one(struct rv_state *rsp) {
 
+    uint32_t iw;
     // Get an instruction word from the current Program Counter    
-    uint32_t iw = *(uint32_t*) rsp->pc;
+    //iw = *(uint32_t*) rsp->pc;
 
     /* could also think of that ^^^ as:
         uint32_t *pc = (uint32_t*) rsp->pc;
         uint32_t iw = *pc;
     */
-
-    //iw = *(uint32_t*) rsp->pc;
     // Use below to add cache
     iw = cache_lookup(&rsp->i_cache, (uint64_t) rsp->pc);
     
