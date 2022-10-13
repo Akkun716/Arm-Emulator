@@ -207,45 +207,26 @@ void emu_b_type(struct rv_state *rsp, uint32_t iw) {
     uint8_t b_exec = 0; //Tracks if branch is taken, default to false
     switch(funct3) {
         case 0b000:
-            if((int32_t)rsp->regs[rs1] == (int32_t)rsp->regs[rs2]) {
-                rsp->pc = rsp->pc + offset;
-                b_exec = 1;
-            } else {
-                rsp->pc += 4;
-            }
+            b_exec = (int64_t)rsp->regs[rs1] == (int64_t)rsp->regs[rs2];
             break;
         case 0b001:
-            if((int64_t)rsp->regs[rs1] != (int64_t)rsp->regs[rs2]) {
-                rsp->pc = rsp->pc + offset;  
-                b_exec = 1;
-            } else {
-                rsp->pc += 4;
-            }
+            b_exec = (int64_t)rsp->regs[rs1] != (int64_t)rsp->regs[rs2];
             break;
         case 0b100:
-            if((int32_t)rsp->regs[rs1] < (int32_t)rsp->regs[rs2]) {
-                rsp->pc = rsp->pc + offset;  
-                b_exec = 1;
-            } else {
-                rsp->pc += 4;
-            }
+            b_exec = (int64_t)rsp->regs[rs1] < (int64_t)rsp->regs[rs2];
             break;
         case 0b101:
-            if((int32_t)rsp->regs[rs1] >= (int32_t)rsp->regs[rs2]) {
-                rsp->pc = rsp->pc + offset;  
-                b_exec = 1;
-            } else {
-                rsp->pc += 4;
-            }
+            b_exec = (int64_t)rsp->regs[rs1] >= (int64_t)rsp->regs[rs2];
             break;
         default:
             unsupported("B-type funct3", funct3);
-            rsp->pc += 4; // Next instruction
     }
 
     if(b_exec) {
+        rsp->pc = rsp->pc + offset;  
         rsp->analysis.b_taken += 1;
     } else {
+        rsp->pc += 4;
         rsp->analysis.b_not_taken += 1;
     }
 }
