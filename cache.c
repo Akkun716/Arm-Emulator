@@ -111,8 +111,9 @@ uint32_t cache_lookup_dm(struct cache_st *csp, uint64_t addr) {
         slot->valid = 1;
         slot->tag = tag;
 
-        // Need to change for block size > 1
+        // Base address for block (sub block index from current addr)
         b_base = ((addr >> 2) - b_index) << 2;
+        //For each entry in slot, update to words from current addr 
         for(int i = 0; i < csp->block_size; i++) {
             slot->block[i] = *((uint32_t *) (b_base + i * 4));
         }
@@ -138,16 +139,16 @@ uint32_t cache_lookup_sa(struct cache_st *csp, uint64_t addr) {
     csp->refs += 1;
 
     uint64_t tag = addr >> (csp->index_bits + csp->block_bits + 2);
+    uint64_t b_index = (addr >> 2) & csp->block_mask;
 
-    uint64_t b_index = 1; // Need to change for block size > 1
-
-    uint64_t b_base;
+    uint64_t b_base = ((addr >> 2) - b_index) << 2;
     int set_index = (addr >> (csp->block_bits + 2)) & csp->index_mask;
     int set_base = set_index * csp->ways;
 
     struct cache_slot_st *slot = NULL;
     struct cache_slot_st *slot_found = NULL;
     struct cache_slot_st *slot_invalid = NULL;
+    struct cache_slot_st *slot_lru = NULL; 
 
     // Check each slot in the set
     for (int i = 0; i < 4; i += 1) {
@@ -160,6 +161,13 @@ uint32_t cache_lookup_sa(struct cache_st *csp, uint64_t addr) {
                 slot_found = slot;
                 csp->hits++;
                 break;
+            }
+
+            //Tracks and updates lru slot for potential eviction
+            if(slot_lru == NULL) {
+                slot_lru = slot;
+            } else if(slot->timestamp < slot_lru->timestamp) {
+                slot_lru = slot;
             }
         } else {
             // Save invalid slot in case of miss
@@ -176,8 +184,7 @@ uint32_t cache_lookup_sa(struct cache_st *csp, uint64_t addr) {
             // Miss due to tag collision is a "hot" miss
             csp->misses_cold += 1;
         } else {
-            // Always pick first slot in set - CHANGE TO LRU
-            slot = &(csp->slots[set_base]);
+            slot = slot_lru;
 
             verbose("  cache tag (%X) miss for set %d tag %X addr %X (evict address %X)\n",
                     slot->tag, set_index, tag, addr, 
@@ -190,8 +197,10 @@ uint32_t cache_lookup_sa(struct cache_st *csp, uint64_t addr) {
     }
 
     if (!hit) {
-        // Need to change for block size > 1        
-        slot->block[b_index] = *((uint32_t *) addr);
+        //For each entry in slot, update to words from current addr 
+        for(int i = 0; i < csp->block_size; i++) {
+            slot->block[i] = *((uint32_t *) (b_base + i * 4));
+        }
         slot->tag = tag;
         slot->valid = true;
     }
